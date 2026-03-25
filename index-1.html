@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0,user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#0a0e1a">
+<title>온습도 모니터</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;400;600;700;900&display=swap');
+*{margin:0;padding:0;box-sizing:border-box}
+:root{--bg:#0a0e1a;--card:#111827;--border:#1e293b;--orange:#f97316;--cyan:#06b6d4;--blue:#3b82f6;--green:#22c55e;--red:#ef4444;--text:#f1f5f9;--dim:#94a3b8}
+body{font-family:'Noto Sans KR',sans-serif;background:var(--bg);color:var(--text);min-height:100vh}
+.app{max-width:500px;margin:0 auto;padding:20px 16px}
+.hdr{text-align:center;margin-bottom:20px}
+.hdr h1{font-size:1.5rem;font-weight:700}
+.hdr p{font-size:.78rem;color:var(--dim);margin-top:4px}
+.status{display:flex;align-items:center;justify-content:center;gap:6px;font-size:.75rem;margin-bottom:20px}
+.dot{width:8px;height:8px;border-radius:50%;animation:pulse 2s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px}
+.card{background:var(--card);border:1px solid var(--border);border-radius:16px;padding:20px 14px;text-align:center;position:relative;overflow:hidden}
+.card::before{content:'';position:absolute;top:0;left:0;right:0;height:3px}
+.card.t::before{background:linear-gradient(90deg,var(--orange),var(--red))}
+.card.h::before{background:linear-gradient(90deg,var(--cyan),var(--blue))}
+.lbl{font-size:.7rem;color:var(--dim);margin-bottom:6px;font-weight:600}
+.val{font-size:2.6rem;font-weight:900;line-height:1}
+.card.t .val{color:var(--orange)}
+.card.h .val{color:var(--cyan)}
+.time{text-align:center;font-size:.8rem;color:var(--dim);margin-bottom:20px}
+.time b{color:var(--text)}
+.sec{margin-bottom:20px}
+.sec h2{font-size:.85rem;font-weight:600;color:var(--dim);margin-bottom:10px}
+.chart-box{background:var(--card);border:1px solid var(--border);border-radius:16px;padding:12px}
+canvas{width:100%!important;height:auto!important;display:block}
+.table-wrap{background:var(--card);border:1px solid var(--border);border-radius:16px;overflow:hidden}
+.scroll{max-height:350px;overflow-y:auto}
+.scroll::-webkit-scrollbar{width:4px}
+.scroll::-webkit-scrollbar-thumb{background:#334155;border-radius:4px}
+table{width:100%;border-collapse:collapse;font-size:.72rem}
+thead th{padding:10px 6px;text-align:center;font-weight:600;color:var(--dim);background:rgba(255,255,255,.03);border-bottom:1px solid var(--border);position:sticky;top:0;z-index:1}
+tbody td{padding:7px 6px;text-align:center;border-bottom:1px solid rgba(255,255,255,.03)}
+tbody tr:last-child td{border:none}
+tbody tr:hover{background:rgba(255,255,255,.02)}
+.tc{color:var(--orange);font-weight:600}
+.hc{color:var(--cyan);font-weight:600}
+.ft{text-align:center;font-size:.65rem;color:#475569;margin-top:20px}
+@media(max-width:360px){.val{font-size:2rem}}
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="hdr">
+    <h1>온습도 모니터</h1>
+    <p>Google Sheets 실시간 연동</p>
+  </div>
+  <div class="status">
+    <div class="dot" id="dot" style="background:var(--green)"></div>
+    <span id="st" style="color:var(--dim)">연결 중...</span>
+  </div>
+  <div class="grid2">
+    <div class="card t"><div class="lbl">최신 온도</div><div class="val" id="tv">--</div></div>
+    <div class="card h"><div class="lbl">최신 습도</div><div class="val" id="hv">--</div></div>
+  </div>
+  <div class="time">측정: <b id="lt">--</b> (원본+16h)</div>
+  <div class="sec"><h2>온도 추이</h2><div class="chart-box"><canvas id="tc" height="180"></canvas></div></div>
+  <div class="sec"><h2>습도 추이</h2><div class="chart-box"><canvas id="hc" height="180"></canvas></div></div>
+  <div class="sec"><h2>측정 기록</h2>
+    <div class="table-wrap"><div class="scroll"><table>
+      <thead><tr><th>측정시각</th><th>온도(°C)</th><th>습도(%)</th></tr></thead>
+      <tbody id="tb"><tr><td colspan="3" style="padding:30px;color:var(--dim)">데이터 로딩 중...</td></tr></tbody>
+    </table></div></div>
+  </div>
+  <div class="ft" id="fu">--</div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
+<script>
+(function(){
+  var SID='1X1kf9WwHaV1I1apmBNWig-TtqNjBnEMY_t08iKna404';
+  var OFF=16,POLL=10000;
+  var tChart=null,hChart=null;
+
+  // ===== gviz JSONP로 데이터 가져오기 =====
+  function fetchGviz(callback){
+    // 이전 스크립트 제거
+    var old=document.getElementById('_gviz_s');
+    if(old)old.remove();
+
+    // 콜백 함수 설정
+    google={visualization:{Query:{setResponse:function(data){
+      try{ callback(null,data); }
+      catch(e){ callback(e); }
+      delete google.visualization.Query.setResponse;
+    }}}};
+
+    // 스크립트 태그로 JSONP 요청
+    var s=document.createElement('script');
+    s.id='_gviz_s';
+    s.src='https://docs.google.com/spreadsheets/d/'+SID+'/gviz/tq?tqx=out:json&t='+Date.now();
+    s.onerror=function(){ callback(new Error('gviz load failed')); };
+    document.head.appendChild(s);
+
+    // 타임아웃
+    setTimeout(function(){
+      if(google&&google.visualization&&google.visualization.Query&&google.visualization.Query.setResponse){
+        callback(new Error('timeout'));
+        delete google.visualization.Query.setResponse;
+      }
+    },15000);
+  }
+
+  // ===== Date(year,month,day,h,m,s) 파싱 =====
+  function parseVDate(v){
+    if(!v)return null;
+    var m=String(v).match(/Date\((\d+),(\d+),(\d+),(\d+),(\d+),(\d+)\)/);
+    if(!m)return null;
+    return new Date(+m[1],+m[2],+m[3],+m[4],+m[5],+m[6]);
+  }
+  function addH(d,h){return new Date(d.getTime()+h*36e5)}
+
+  function fmtShort(d){
+    var mo=d.getMonth()+1,da=d.getDate(),h=d.getHours(),mi=('0'+d.getMinutes()).slice(-2),s=('0'+d.getSeconds()).slice(-2);
+    var ap=h<12?'오전':'오후',h12=h%12||12;
+    return mo+'/'+da+' '+ap+' '+h12+':'+mi+':'+s;
+  }
+  function fmtFull(d){
+    var mo=d.getMonth()+1,da=d.getDate(),h=d.getHours(),mi=('0'+d.getMinutes()).slice(-2),s=('0'+d.getSeconds()).slice(-2);
+    var ap=h<12?'오전':'오후',h12=h%12||12;
+    return mo+'월 '+da+'일 '+ap+' '+h12+':'+mi+':'+s;
+  }
+  function fmtTick(d){
+    var h=d.getHours(),mi=('0'+d.getMinutes()).slice(-2);
+    return(h%12||12)+':'+mi+(h<12?'a':'p');
+  }
+
+  // ===== gviz 응답 파싱 =====
+  function parseResponse(data){
+    var rows=[];
+    if(!data||!data.table||!data.table.rows)return rows;
+    var r=data.table.rows;
+    for(var i=0;i<r.length;i++){
+      if(!r[i].c||r[i].c.length<3)continue;
+      var vd=r[i].c[0]&&r[i].c[0].v;
+      var temp=r[i].c[1]&&r[i].c[1].v;
+      var hum=r[i].c[2]&&r[i].c[2].v;
+      temp=temp!=null?parseFloat(temp):NaN;
+      hum=hum!=null?parseFloat(hum):NaN;
+      if(isNaN(temp)||isNaN(hum))continue;
+      var dt=parseVDate(vd);
+      if(!dt){
+        // 폴백: f 필드에서 한국 날짜 파싱
+        var fs=r[i].c[0]&&r[i].c[0].f;
+        if(fs){
+          var fm=fs.match(/(\d{4})\.\s*(\d{1,2})\.\s*(\d{1,2})\s+(오전|오후)\s+(\d{1,2}):(\d{2}):(\d{2})/);
+          if(fm){
+            var h=+fm[5];
+            if(fm[4]==='오후'&&h!==12)h+=12;
+            if(fm[4]==='오전'&&h===12)h=0;
+            dt=new Date(+fm[1],+fm[2]-1,+fm[3],h,+fm[6],+fm[7]);
+          }
+        }
+      }
+      if(!dt)continue;
+      rows.push({orig:dt,adj:addH(dt,OFF),t:temp,h:hum});
+    }
+    return rows;
+  }
+
+  // ===== 차트 =====
+  function drawCharts(rows){
+    if(typeof Chart==='undefined')return;
+    var valid=rows.filter(function(r){return r.t!==0||r.h!==0});
+    var sample=valid.slice(-80).reverse();
+    var labels=[],temps=[],hums=[];
+    for(var i=0;i<sample.length;i++){
+      labels.push(fmtTick(sample[i].adj));
+      temps.push(sample[i].t);
+      hums.push(sample[i].h);
+    }
+    var gc='rgba(255,255,255,0.06)',tc='#64748b';
+    var base={
+      responsive:true,animation:{duration:400},
+      plugins:{legend:{display:false},tooltip:{mode:'index',intersect:false}},
+      scales:{
+        x:{grid:{color:gc},ticks:{color:tc,maxTicksLimit:8,font:{size:10}}},
+        y:{grid:{color:gc},ticks:{color:tc,font:{size:10}}}
+      },
+      elements:{point:{radius:1.5,hoverRadius:4},line:{tension:0.35,borderWidth:2}}
+    };
+
+    if(tChart)tChart.destroy();
+    tChart=new Chart(document.getElementById('tc'),{
+      type:'line',
+      data:{labels:labels,datasets:[{data:temps,borderColor:'#f97316',backgroundColor:'rgba(249,115,22,0.08)',fill:true}]},
+      options:base
+    });
+    if(hChart)hChart.destroy();
+    hChart=new Chart(document.getElementById('hc'),{
+      type:'line',
+      data:{labels:labels,datasets:[{data:hums,borderColor:'#06b6d4',backgroundColor:'rgba(6,182,212,0.08)',fill:true}]},
+      options:base
+    });
+  }
+
+  // ===== UI 업데이트 =====
+  function updateUI(rows){
+    if(!rows||!rows.length){
+      document.getElementById('st').textContent='데이터 없음';
+      document.getElementById('st').style.color='var(--red)';
+      document.getElementById('dot').style.background='var(--red)';
+      return;
+    }
+    rows.sort(function(a,b){return b.adj-a.adj});
+    var valid=rows.filter(function(r){return r.t!==0||r.h!==0});
+    var lat=valid.length?valid[0]:rows[0];
+
+    document.getElementById('tv').innerHTML=lat.t+'<small style="font-size:.35em;opacity:.6">°C</small>';
+    document.getElementById('hv').innerHTML=lat.h+'<small style="font-size:.35em;opacity:.6">%</small>';
+    document.getElementById('lt').textContent=fmtFull(lat.adj);
+    document.getElementById('st').textContent='실시간 연결됨';
+    document.getElementById('st').style.color='var(--green)';
+    document.getElementById('dot').style.background='var(--green)';
+
+    var now=new Date();
+    document.getElementById('fu').textContent='마지막 갱신: '+now.toLocaleTimeString('ko-KR')+' · 10초마다 자동';
+
+    // 테이블
+    var show=valid.slice(0,50),html='';
+    for(var i=0;i<show.length;i++){
+      var r=show[i];
+      html+='<tr><td>'+fmtShort(r.adj)+'</td><td class="tc">'+r.t+'°</td><td class="hc">'+r.h+'%</td></tr>';
+    }
+    document.getElementById('tb').innerHTML=html;
+
+    // 차트
+    drawCharts(rows);
+  }
+
+  // ===== 메인 =====
+  function fetchData(){
+    fetchGviz(function(err,data){
+      if(err){
+        console.error('Fetch error:',err);
+        document.getElementById('st').textContent='연결 실패 - 재시도 중...';
+        document.getElementById('st').style.color='var(--red)';
+        document.getElementById('dot').style.background='var(--red)';
+        return;
+      }
+      var rows=parseResponse(data);
+      updateUI(rows);
+    });
+  }
+
+  // Chart.js 로드 대기 후 시작
+  function start(){
+    if(typeof Chart!=='undefined'){
+      fetchData();
+      setInterval(fetchData,POLL);
+    } else {
+      setTimeout(start,500);
+    }
+  }
+  start();
+})();
+</script>
+</body>
+</html>
