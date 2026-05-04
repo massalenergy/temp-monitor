@@ -31,6 +31,10 @@ body{font-family:'Noto Sans KR',sans-serif;background:var(--bg);color:var(--text
 .time b{color:var(--text)}
 .sec{margin-bottom:20px}
 .sec h2{font-size:.85rem;font-weight:600;color:var(--dim);margin-bottom:10px}
+/* 범위 선택 버튼 */
+.range-bar{display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap}
+.rbtn{background:var(--card);border:1px solid var(--border);color:var(--dim);padding:6px 14px;border-radius:20px;font-size:.7rem;font-weight:600;cursor:pointer;transition:.2s}
+.rbtn.active{background:var(--orange);border-color:var(--orange);color:#fff}
 .chart-box{background:var(--card);border:1px solid var(--border);border-radius:16px;padding:12px}
 canvas{width:100%!important;height:auto!important;display:block}
 .table-wrap{background:var(--card);border:1px solid var(--border);border-radius:16px;overflow:hidden}
@@ -63,8 +67,31 @@ tbody tr:hover{background:rgba(255,255,255,.02)}
     <div class="card h"><div class="lbl">최신 습도</div><div class="val" id="hv">--</div></div>
   </div>
   <div class="time">측정: <b id="lt">--</b> (원본+16h)</div>
-  <div class="sec"><h2>온도 추이</h2><div class="chart-box"><canvas id="tc" height="180"></canvas></div></div>
-  <div class="sec"><h2>습도 추이</h2><div class="chart-box"><canvas id="hc" height="180"></canvas></div></div>
+
+  <!-- 온도 추이 섹션 -->
+  <div class="sec">
+    <h2>온도 추이</h2>
+    <div class="range-bar">
+      <button data-range="1h" class="rbtn">1시간</button>
+      <button data-range="1d" class="rbtn active">1일</button>
+      <button data-range="1w" class="rbtn">1주</button>
+      <button data-range="1m" class="rbtn">1개월</button>
+    </div>
+    <div class="chart-box"><canvas id="tc" height="180"></canvas></div>
+  </div>
+
+  <!-- 습도 추이 섹션 -->
+  <div class="sec">
+    <h2>습도 추이</h2>
+    <div class="range-bar">
+      <button data-range="1h" class="rbtn">1시간</button>
+      <button data-range="1d" class="rbtn active">1일</button>
+      <button data-range="1w" class="rbtn">1주</button>
+      <button data-range="1m" class="rbtn">1개월</button>
+    </div>
+    <div class="chart-box"><canvas id="hc" height="180"></canvas></div>
+  </div>
+
   <div class="sec"><h2>측정 기록</h2>
     <div class="table-wrap"><div class="scroll"><table>
       <thead><tr><th>측정시각</th><th>온도(°C)</th><th>습도(%)</th></tr></thead>
@@ -79,29 +106,27 @@ tbody tr:hover{background:rgba(255,255,255,.02)}
 (function(){
   var SID='1X1kf9WwHaV1I1apmBNWig-TtqNjBnEMY_t08iKna404';
   var OFF=16,POLL=10000;
-  var tChart=null,hChart=null;
+  var currentRange = '1d';  // 기본 범위
+  var tChart=null, hChart=null;
+  var allRows = [];         // 전체 데이터 저장
 
   // ===== gviz JSONP로 데이터 가져오기 =====
   function fetchGviz(callback){
-    // 이전 스크립트 제거
     var old=document.getElementById('_gviz_s');
     if(old)old.remove();
 
-    // 콜백 함수 설정
     google={visualization:{Query:{setResponse:function(data){
       try{ callback(null,data); }
       catch(e){ callback(e); }
       delete google.visualization.Query.setResponse;
     }}}};
 
-    // 스크립트 태그로 JSONP 요청
     var s=document.createElement('script');
     s.id='_gviz_s';
     s.src='https://docs.google.com/spreadsheets/d/'+SID+'/gviz/tq?tqx=out:json&t='+Date.now();
     s.onerror=function(){ callback(new Error('gviz load failed')); };
     document.head.appendChild(s);
 
-    // 타임아웃
     setTimeout(function(){
       if(google&&google.visualization&&google.visualization.Query&&google.visualization.Query.setResponse){
         callback(new Error('timeout'));
@@ -110,7 +135,7 @@ tbody tr:hover{background:rgba(255,255,255,.02)}
     },15000);
   }
 
-  // ===== Date(year,month,day,h,m,s) 파싱 =====
+  // ===== Date 파싱 유틸 =====
   function parseVDate(v){
     if(!v)return null;
     var m=String(v).match(/Date\((\d+),(\d+),(\d+),(\d+),(\d+),(\d+)\)/);
@@ -149,7 +174,6 @@ tbody tr:hover{background:rgba(255,255,255,.02)}
       if(isNaN(temp)||isNaN(hum))continue;
       var dt=parseVDate(vd);
       if(!dt){
-        // 폴백: f 필드에서 한국 날짜 파싱
         var fs=r[i].c[0]&&r[i].c[0].f;
         if(fs){
           var fm=fs.match(/(\d{4})\.\s*(\d{1,2})\.\s*(\d{1,2})\s+(오전|오후)\s+(\d{1,2}):(\d{2}):(\d{2})/);
@@ -167,53 +191,106 @@ tbody tr:hover{background:rgba(255,255,255,.02)}
     return rows;
   }
 
-  // ===== 차트 =====
-  function drawCharts(rows){
-    if(typeof Chart==='undefined')return;
-    var valid=rows.filter(function(r){return r.t!==0||r.h!==0});
-    var sample=valid.slice(-80).reverse();
-    var labels=[],temps=[],hums=[];
-    for(var i=0;i<sample.length;i++){
-      labels.push(fmtTick(sample[i].adj));
-      temps.push(sample[i].t);
-      hums.push(sample[i].h);
+  // ===== 집계 함수 (1주/1달용) =====
+  function aggregateByHour(data, monthly){
+    var groups = {};
+    data.forEach(function(r){
+      var d = new Date(r.adj);
+      d.setMinutes(0,0,0);
+      if(monthly){
+        // 1개월: 4시간 단위로 묶기
+        d.setHours(Math.floor(d.getHours()/4)*4);
+      } else {
+        // 1주일: 1시간 단위
+        d.setHours(d.getHours());
+      }
+      var key = d.getTime();
+      if(!groups[key]){
+        groups[key] = {adj:new Date(key), tSum:0, hSum:0, cnt:0};
+      }
+      groups[key].tSum += r.t;
+      groups[key].hSum += r.h;
+      groups[key].cnt++;
+    });
+    var result = Object.values(groups).map(function(g){
+      return {adj: g.adj, t: +(g.tSum/g.cnt).toFixed(1), h: +(g.hSum/g.cnt).toFixed(1)};
+    });
+    result.sort(function(a,b){return a.adj - b.adj;});
+    return result;
+  }
+
+  // ===== 범위별 시작 시각 계산 =====
+  function getStartFromLatest(latest){
+    switch(currentRange){
+      case '1h': return new Date(latest.getTime() - 60*60*1000);
+      case '1d': return new Date(latest.getTime() - 24*60*60*1000);
+      case '1w': return new Date(latest.getTime() - 7*24*60*60*1000);
+      case '1m': return new Date(latest.getTime() - 30*24*60*60*1000);
+      default: return new Date(latest.getTime() - 24*60*60*1000);
     }
-    var gc='rgba(255,255,255,0.06)',tc='#64748b';
+  }
+
+  // ===== 차트 그리기 =====
+  function drawCharts(displayRows){
+    if(typeof Chart==='undefined') return;
+    if(!displayRows || displayRows.length===0){
+      // 차트 초기화
+      if(tChart){tChart.destroy(); tChart=null;}
+      if(hChart){hChart.destroy(); hChart=null;}
+      return;
+    }
+
+    // 시간순 정렬 (오래된 → 최신)
+    var sorted = displayRows.slice().sort(function(a,b){return a.adj - b.adj;});
+    var labels=[], temps=[], hums=[];
+    for(var i=0;i<sorted.length;i++){
+      labels.push(fmtTick(sorted[i].adj));
+      temps.push(sorted[i].t);
+      hums.push(sorted[i].h);
+    }
+
+    var gc='rgba(255,255,255,0.06)', tc='#64748b';
     var base={
-      responsive:true,animation:{duration:400},
-      plugins:{legend:{display:false},tooltip:{mode:'index',intersect:false}},
+      responsive:true, animation:{duration:400},
+      plugins:{legend:{display:false}, tooltip:{mode:'index',intersect:false}},
       scales:{
-        x:{grid:{color:gc},ticks:{color:tc,maxTicksLimit:8,font:{size:10}}},
-        y:{grid:{color:gc},ticks:{color:tc,font:{size:10}}}
+        x:{grid:{color:gc}, ticks:{color:tc, maxTicksLimit:8, font:{size:10}}},
+        y:{grid:{color:gc}, ticks:{color:tc, font:{size:10}}}
       },
-      elements:{point:{radius:1.5,hoverRadius:4},line:{tension:0.35,borderWidth:2}}
+      elements:{point:{radius:1.5, hoverRadius:4}, line:{tension:0.35, borderWidth:2}}
     };
 
-    if(tChart)tChart.destroy();
-    tChart=new Chart(document.getElementById('tc'),{
+    // 온도 차트
+    if(tChart) tChart.destroy();
+    tChart = new Chart(document.getElementById('tc'),{
       type:'line',
-      data:{labels:labels,datasets:[{data:temps,borderColor:'#f97316',backgroundColor:'rgba(249,115,22,0.08)',fill:true}]},
+      data:{labels:labels, datasets:[{data:temps, borderColor:'#f97316', backgroundColor:'rgba(249,115,22,0.08)', fill:true}]},
       options:base
     });
-    if(hChart)hChart.destroy();
-    hChart=new Chart(document.getElementById('hc'),{
+
+    // 습도 차트
+    if(hChart) hChart.destroy();
+    hChart = new Chart(document.getElementById('hc'),{
       type:'line',
-      data:{labels:labels,datasets:[{data:hums,borderColor:'#06b6d4',backgroundColor:'rgba(6,182,212,0.08)',fill:true}]},
+      data:{labels:labels, datasets:[{data:hums, borderColor:'#06b6d4', backgroundColor:'rgba(6,182,212,0.08)', fill:true}]},
       options:base
     });
   }
 
   // ===== UI 업데이트 =====
   function updateUI(rows){
-    if(!rows||!rows.length){
+    if(!rows || !rows.length){
       document.getElementById('st').textContent='데이터 없음';
       document.getElementById('st').style.color='var(--red)';
       document.getElementById('dot').style.background='var(--red)';
       return;
     }
-    rows.sort(function(a,b){return b.adj-a.adj});
-    var valid=rows.filter(function(r){return r.t!==0||r.h!==0});
-    var lat=valid.length?valid[0]:rows[0];
+
+    // 전체 데이터에서 최신 정보 (범위와 무관하게 항상 최신 표시)
+    var sortedAll = rows.slice().sort(function(a,b){return b.adj - a.adj;});
+    var validAll = sortedAll.filter(function(r){return r.t!==0 || r.h!==0;});
+    if(validAll.length===0) return;
+    var lat = validAll[0];
 
     document.getElementById('tv').innerHTML=lat.t+'<small style="font-size:.35em;opacity:.6">°C</small>';
     document.getElementById('hv').innerHTML=lat.h+'<small style="font-size:.35em;opacity:.6">%</small>';
@@ -225,19 +302,30 @@ tbody tr:hover{background:rgba(255,255,255,.02)}
     var now=new Date();
     document.getElementById('fu').textContent='마지막 갱신: '+now.toLocaleTimeString('ko-KR')+' · 10초마다 자동';
 
-    // 테이블
-    var show=valid.slice(0,50),html='';
+    // 현재 선택된 범위에 따라 필터링
+    var start = getStartFromLatest(lat.adj);
+    var rangeValid = validAll.filter(function(r){return r.adj >= start;});
+
+    // 긴 범위면 집계
+    var displayData = rangeValid;
+    if(currentRange==='1w' || currentRange==='1m'){
+      displayData = aggregateByHour(rangeValid, currentRange==='1m');
+    }
+
+    // 테이블 업데이트
+    var show = displayData.slice().sort(function(a,b){return b.adj - a.adj;}).slice(0,50);
+    var html='';
     for(var i=0;i<show.length;i++){
       var r=show[i];
       html+='<tr><td>'+fmtShort(r.adj)+'</td><td class="tc">'+r.t+'°</td><td class="hc">'+r.h+'%</td></tr>';
     }
     document.getElementById('tb').innerHTML=html;
 
-    // 차트
-    drawCharts(rows);
+    // 차트 업데이트
+    drawCharts(displayData);
   }
 
-  // ===== 메인 =====
+  // ===== 데이터 가져오기 =====
   function fetchData(){
     fetchGviz(function(err,data){
       if(err){
@@ -248,17 +336,37 @@ tbody tr:hover{background:rgba(255,255,255,.02)}
         return;
       }
       var rows=parseResponse(data);
-      updateUI(rows);
+      allRows = rows;
+      updateUI(allRows);
     });
   }
 
-  // Chart.js 로드 대기 후 시작
+  // ===== 초기화 =====
   function start(){
     if(typeof Chart!=='undefined'){
+      // 범위 버튼 이벤트 등록
+      document.querySelectorAll('.rbtn').forEach(function(btn){
+        btn.addEventListener('click', function(e){
+          var newRange = this.dataset.range;
+          if(!newRange) return;
+          currentRange = newRange;
+
+          // 모든 버튼 active 해제 후 현재 버튼 활성화
+          document.querySelectorAll('.rbtn').forEach(function(b){b.classList.remove('active');});
+          // 같은 range 값을 가진 버튼 모두 활성화 (온도/습도 두 섹션)
+          document.querySelectorAll('.rbtn[data-range="'+newRange+'"]').forEach(function(b){b.classList.add('active');});
+
+          // 데이터 다시 표시
+          if(allRows.length>0){
+            updateUI(allRows);
+          }
+        });
+      });
+
       fetchData();
-      setInterval(fetchData,POLL);
+      setInterval(fetchData, POLL);
     } else {
-      setTimeout(start,500);
+      setTimeout(start, 500);
     }
   }
   start();
