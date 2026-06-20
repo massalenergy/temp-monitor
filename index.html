@@ -103,7 +103,7 @@ tbody tr:hover{background:rgba(255,255,255,.02)}
 <script>
 (function(){
   var SID='1X1kf9WwHaV1I1apmBNWig-TtqNjBnEMY_t08iKna404';
-  var OFF=16,POLL=10000;
+  var OFF=16,HUM_OFF=15,POLL=10000;
   var currentRange = '1d';
   var tChart=null, hChart=null;
   var allRows = [];
@@ -162,7 +162,7 @@ tbody tr:hover{background:rgba(255,255,255,.02)}
       var temp=r[i].c[1]&&r[i].c[1].v;
       var hum=r[i].c[2]&&r[i].c[2].v;
       temp=temp!=null?parseFloat(temp):NaN;
-      hum=hum!=null?parseFloat(hum):NaN;
+      hum=hum!=null?parseFloat(hum)+HUM_OFF:NaN;
       if(isNaN(temp)||isNaN(hum))continue;
       var dt=parseVDate(vd);
       if(!dt){
