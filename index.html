@@ -74,6 +74,8 @@ tbody tr:hover{background:rgba(255,255,255,.02)}
       <button data-range="1d" class="rbtn active">1일</button>
       <button data-range="1w" class="rbtn">1주</button>
       <button data-range="1m" class="rbtn">1개월</button>
+      <button data-range="3m" class="rbtn">3개월</button>
+      <button data-range="6m" class="rbtn">6개월</button>
     </div>
     <div class="chart-box"><canvas id="tc" height="180"></canvas></div>
   </div>
@@ -85,6 +87,8 @@ tbody tr:hover{background:rgba(255,255,255,.02)}
       <button data-range="1d" class="rbtn active">1일</button>
       <button data-range="1w" class="rbtn">1주</button>
       <button data-range="1m" class="rbtn">1개월</button>
+      <button data-range="3m" class="rbtn">3개월</button>
+      <button data-range="6m" class="rbtn">6개월</button>
     </div>
     <div class="chart-box"><canvas id="hc" height="180"></canvas></div>
   </div>
@@ -200,9 +204,27 @@ tbody tr:hover{background:rgba(255,255,255,.02)}
       d.setMinutes(0,0,0);
       if(monthly){
         d.setHours(Math.floor(d.getHours()/4)*4);
-      } else {
-        // 그대로
       }
+      var key = d.getTime();
+      if(!groups[key]){
+        groups[key] = {adj:new Date(key), tSum:0, hSum:0, cnt:0};
+      }
+      groups[key].tSum += r.t;
+      groups[key].hSum += r.h;
+      groups[key].cnt++;
+    });
+    var result = Object.values(groups).map(function(g){
+      return {adj: g.adj, t: +(g.tSum/g.cnt).toFixed(1), h: +(g.hSum/g.cnt).toFixed(1)};
+    });
+    result.sort(function(a,b){return a.adj - b.adj;});
+    return result;
+  }
+
+  function aggregateByDay(data){
+    var groups = {};
+    data.forEach(function(r){
+      var d = new Date(r.adj);
+      d.setHours(0,0,0,0);
       var key = d.getTime();
       if(!groups[key]){
         groups[key] = {adj:new Date(key), tSum:0, hSum:0, cnt:0};
@@ -224,6 +246,8 @@ tbody tr:hover{background:rgba(255,255,255,.02)}
     else if(currentRange==='1d') ms = 24*60*60*1000;
     else if(currentRange==='1w') ms = 7*24*60*60*1000;
     else if(currentRange==='1m') ms = 30*24*60*60*1000;
+    else if(currentRange==='3m') ms = 90*24*60*60*1000;
+    else if(currentRange==='6m') ms = 180*24*60*60*1000;
     return new Date(latest.getTime() - ms);
   }
 
@@ -249,6 +273,16 @@ tbody tr:hover{background:rgba(255,255,255,.02)}
       opts.time.unit='day';
       opts.time.stepSize=4;
       opts.time.displayFormats={day:'MM/dd'};
+      opts.ticks.maxTicksLimit=8;
+    } else if(currentRange==='3m'){
+      opts.time.unit='week';
+      opts.time.stepSize=2;
+      opts.time.displayFormats={week:'MM/dd'};
+      opts.ticks.maxTicksLimit=8;
+    } else if(currentRange==='6m'){
+      opts.time.unit='month';
+      opts.time.stepSize=1;
+      opts.time.displayFormats={month:'yy/MM'};
       opts.ticks.maxTicksLimit=8;
     }
     return opts;
@@ -330,8 +364,12 @@ tbody tr:hover{background:rgba(255,255,255,.02)}
     var rangeValid = validAll.filter(function(r){return r.adj >= start;});
 
     var displayData = rangeValid;
-    if(currentRange==='1w' || currentRange==='1m'){
-      displayData = aggregateByHour(rangeValid, currentRange==='1m');
+    if(currentRange==='1w'){
+      displayData = aggregateByHour(rangeValid, false);
+    } else if(currentRange==='1m'){
+      displayData = aggregateByHour(rangeValid, true);
+    } else if(currentRange==='3m' || currentRange==='6m'){
+      displayData = aggregateByDay(rangeValid);
     }
 
     // 테이블 (최신순)
