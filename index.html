@@ -54,8 +54,8 @@ button{cursor:pointer}
 .rbtn{background:var(--card);border:1px solid var(--border);color:var(--dim);padding:6px 13px;border-radius:20px;font-size:.7rem;font-weight:600;transition:.2s}
 .rbtn:hover{border-color:var(--orange);color:var(--text)}
 .rbtn.active{background:var(--orange);border-color:var(--orange);color:#fff}
-.chart-box{position:relative;background:var(--card);border:1px solid var(--border);border-radius:16px;padding:12px;min-height:205px}
-canvas{width:100%!important;height:auto!important;display:block}
+.chart-box{position:relative;background:var(--card);border:1px solid var(--border);border-radius:16px;padding:12px;height:206px;touch-action:pan-y}
+.chart-box canvas{width:100%!important;height:180px!important;display:block;touch-action:pan-y}
 .chart-empty{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:.76rem;pointer-events:none}
 .table-wrap{background:var(--card);border:1px solid var(--border);border-radius:16px;overflow:hidden}
 .scroll{max-height:360px;overflow:auto}
@@ -143,7 +143,7 @@ tbody tr:hover{background:rgba(255,255,255,.025)}
   var DEFAULT_OFFSET=16, DEFAULT_HUM_OFFSET=15, POLL=10000, STALE_MS=5*60*1000;
   var CACHE_KEY='temp-monitor-cache-v2';
   var SETTINGS_KEY='temp-monitor-settings-v2';
-  var currentRange='1d', allRows=[], tChart=null, hChart=null, requestId=0, isFetching=false, pollTimer=null, lastDataSource='live';
+  var currentRange='1d', allRows=[], tChart=null, hChart=null, chartSignature='', requestId=0, isFetching=false, pollTimer=null, lastDataSource='live';
   var settings={offset:DEFAULT_OFFSET, humOffset:DEFAULT_HUM_OFFSET};
 
   function $(id){return document.getElementById(id)}
@@ -179,6 +179,10 @@ tbody tr:hover{background:rgba(255,255,255,.025)}
   function formatDate(date,full){
     if(!(date instanceof Date)||isNaN(date.getTime())) return '--';
     return date.toLocaleString('ko-KR',full?{year:'numeric',month:'long',day:'numeric',hour:'numeric',minute:'2-digit'}:{month:'numeric',day:'numeric',hour:'numeric',minute:'2-digit'});
+  }
+  function csvDate(date){
+    function pad(value){return String(value).padStart(2,'0')}
+    return date.getFullYear()+'-'+pad(date.getMonth()+1)+'-'+pad(date.getDate())+' '+pad(date.getHours())+':'+pad(date.getMinutes())+':'+pad(date.getSeconds());
   }
   function formatAge(ms){
     if(!finite(ms)||ms<0) return '';
@@ -224,6 +228,7 @@ tbody tr:hover{background:rgba(255,255,255,.025)}
   }
 
   function cellValue(cell){return cell&&cell.v!==undefined&&cell.v!==null?cell.v:null}
+  function cellDisplayValue(cell){var value=cellValue(cell);return value!==null?value:cell&&cell.f}
   function findColumn(labels,patterns,fallback){
     for(var i=0;i<labels.length;i++){
       if(patterns.some(function(pattern){return pattern.test(labels[i])})) return i;
@@ -241,9 +246,9 @@ tbody tr:hover{background:rgba(255,255,255,.025)}
     data.table.rows.forEach(function(row){
       if(!row||!Array.isArray(row.c)) return;
       var dateCell=row.c[dateIndex], tempCell=row.c[tempIndex], humCell=row.c[humIndex];
-      var original=parseVDate(cellValue(dateCell)||dateCell&&dateCell.f);
-      var temperature=numberValue(cellValue(tempCell)||tempCell&&tempCell.f);
-      var rawHumidity=numberValue(cellValue(humCell)||humCell&&humCell.f);
+      var original=parseVDate(cellDisplayValue(dateCell));
+      var temperature=numberValue(cellDisplayValue(tempCell));
+      var rawHumidity=numberValue(cellDisplayValue(humCell));
       if(!original||!finite(temperature)||!finite(rawHumidity)) return;
       // DHT/ESP32 부팅 직후의 0/0 placeholder와 물리적으로 불가능한 값을 제외한다.
       if(temperature===0&&rawHumidity===0) return;
@@ -326,22 +331,48 @@ tbody tr:hover{background:rgba(255,255,255,.025)}
     if(map){options.time.unit=map.unit;options.time.stepSize=map.stepSize;options.time.displayFormats={};options.time.displayFormats[map.unit]=map.format;options.ticks.maxTicksLimit=map.limit}
     return options;
   }
+  function isCoarsePointer(){return window.matchMedia&&window.matchMedia('(pointer: coarse)').matches}
   function chartOptions(){
-    return {responsive:true,maintainAspectRatio:true,animation:{duration:250},interaction:{mode:'index',intersect:false},plugins:{legend:{display:false},tooltip:{callbacks:{title:function(items){return items.length?formatDate(new Date(items[0].parsed.x),true):''}}}},scales:{x:scaleOptions(),y:{grid:{color:'rgba(255,255,255,.06)'},ticks:{color:'#64748b',font:{size:10}}}},elements:{point:{radius:1.5,hoverRadius:4},line:{tension:.35,borderWidth:2}}};
+    var coarse=isCoarsePointer();
+    return {
+      responsive:true,maintainAspectRatio:false,resizeDelay:100,
+      // 모바일에서는 touchmove를 Chart.js에 전달하지 않아 손가락 미세 이동에 따른 타점 교체/떨림을 막는다.
+      events:coarse?['touchstart','click']:['mousemove','mouseout','click'],
+      animation:false,hover:{animationDuration:0},
+      interaction:coarse?{mode:'nearest',axis:'x',intersect:false}:{mode:'index',intersect:false},
+      plugins:{legend:{display:false},tooltip:{animation:false,mode:'nearest',intersect:false,callbacks:{title:function(items){return items.length?formatDate(new Date(items[0].parsed.x),true):''}}}},
+      transitions:{active:{animation:{duration:0}}},
+      scales:{x:scaleOptions(),y:{grid:{color:'rgba(255,255,255,.06)'},ticks:{color:'#64748b',font:{size:10}}}},
+      elements:{point:{radius:2,hoverRadius:4,hitRadius:12},line:{tension:.35,borderWidth:2}}
+    };
+  }
+  function clearCharts(){
+    if(tChart){tChart.destroy();tChart=null}
+    if(hChart){hChart.destroy();hChart=null}
+    chartSignature='';
   }
   function drawCharts(rows){
     var hasChart=typeof window.Chart==='function';
     $('tempEmpty').style.display=rows.length&&hasChart?'none':'flex'; $('humEmpty').style.display=rows.length&&hasChart?'none':'flex';
     if(!rows.length){$('tempEmpty').textContent='선택 구간에 데이터가 없습니다';$('humEmpty').textContent='선택 구간에 데이터가 없습니다'}
     else if(!hasChart){$('tempEmpty').textContent='차트 라이브러리를 불러오지 못했습니다';$('humEmpty').textContent='차트 라이브러리를 불러오지 못했습니다'}
-    if(!hasChart||!rows.length){if(tChart){tChart.destroy();tChart=null}if(hChart){hChart.destroy();hChart=null}return}
+    if(!hasChart||!rows.length){clearCharts();return}
     var tempData=rows.map(function(row){return {x:row.adj.getTime(),y:row.t}}), humData=rows.map(function(row){return {x:row.adj.getTime(),y:row.h}});
-    if(tChart)tChart.destroy(); if(hChart)hChart.destroy();
+    var signature=currentRange+'|'+rows.map(function(row){return row.adj.getTime()+':'+row.t+':'+row.h}).join(';');
+    if(signature===chartSignature&&tChart&&hChart)return;
     try{
-      tChart=new Chart($('tc'),{type:'line',data:{datasets:[{data:tempData,borderColor:'#f97316',backgroundColor:'rgba(249,115,22,.08)',fill:true}]},options:chartOptions()});
-      hChart=new Chart($('hc'),{type:'line',data:{datasets:[{data:humData,borderColor:'#06b6d4',backgroundColor:'rgba(6,182,212,.08)',fill:true}]},options:chartOptions()});
+      if(tChart&&hChart){
+        // 새 로그가 들어와도 canvas를 갈아끼우지 않고 데이터만 갱신해 터치 중 레이아웃 점프를 방지한다.
+        tChart.data.datasets[0].data=tempData; tChart.options=chartOptions(); tChart.update('none');
+        hChart.data.datasets[0].data=humData; hChart.options=chartOptions(); hChart.update('none');
+      }else{
+        clearCharts();
+        tChart=new Chart($('tc'),{type:'line',data:{datasets:[{data:tempData,borderColor:'#f97316',backgroundColor:'rgba(249,115,22,.08)',fill:true}]},options:chartOptions()});
+        hChart=new Chart($('hc'),{type:'line',data:{datasets:[{data:humData,borderColor:'#06b6d4',backgroundColor:'rgba(6,182,212,.08)',fill:true}]},options:chartOptions()});
+      }
+      chartSignature=signature;
     }catch(error){
-      console.error('Chart render error:',error); if(tChart){tChart.destroy();tChart=null} if(hChart){hChart.destroy();hChart=null}
+      console.error('Chart render error:',error); clearCharts();
       $('tempEmpty').textContent='차트를 표시할 수 없습니다'; $('humEmpty').textContent='차트를 표시할 수 없습니다'; $('tempEmpty').style.display='flex'; $('humEmpty').style.display='flex';
     }
   }
@@ -391,9 +422,9 @@ tbody tr:hover{background:rgba(255,255,255,.025)}
     var rows=getDisplayData();
     if(!rows.length){setStatus('error','내보낼 데이터가 없습니다');return}
     var lines=['측정시각,온도(°C),습도(%)'];
-    rows.slice().sort(function(a,b){return a.adj-b.adj}).forEach(function(row){lines.push([row.adj.toISOString(),row.t.toFixed(1),row.h.toFixed(1)].join(','))});
+    rows.slice().sort(function(a,b){return a.adj-b.adj}).forEach(function(row){lines.push([csvDate(row.adj),row.t.toFixed(1),row.h.toFixed(1)].join(','))});
     var blob=new Blob(['\ufeff'+lines.join('\n')],{type:'text/csv;charset=utf-8'}), url=URL.createObjectURL(blob), link=document.createElement('a');
-    link.href=url; link.download='temperature-'+currentRange+'-'+new Date().toISOString().slice(0,10)+'.csv'; document.body.appendChild(link); link.click(); link.remove(); setTimeout(function(){URL.revokeObjectURL(url)},1000);
+    link.href=url; link.download='temperature-'+currentRange+'-'+csvDate(new Date()).slice(0,10)+'.csv'; document.body.appendChild(link); link.click(); link.remove(); setTimeout(function(){URL.revokeObjectURL(url)},1000);
   }
   function copyLatest(){
     var valid=allRows.filter(function(row){return finite(row.t)&&finite(row.h)}).sort(function(a,b){return b.adj-a.adj});
