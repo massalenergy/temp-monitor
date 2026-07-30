@@ -45,8 +45,6 @@ button{cursor:pointer}
 .age{font-size:.7rem;color:var(--muted);margin-left:3px}
 .toolbar{display:flex;justify-content:center;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:22px}
 .toolbar .action-btn{padding:6px 11px}
-.auto-label{display:flex;align-items:center;gap:5px;font-size:.7rem;color:var(--dim);cursor:pointer}
-.auto-label input{accent-color:var(--orange)}
 .sec{margin-bottom:22px}
 .sec-head{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:10px}
 .sec h2{font-size:.88rem;font-weight:600;color:var(--dim)}
@@ -99,7 +97,6 @@ tbody tr:hover{background:rgba(255,255,255,.025)}
   <div class="toolbar">
     <button class="action-btn" id="exportBtn" type="button">CSV 저장</button>
     <button class="action-btn" id="copyBtn" type="button">최신값 복사</button>
-    <label class="auto-label"><input id="autoRefresh" type="checkbox" checked> 10초 자동 갱신</label>
   </div>
 
   <details class="settings" id="settings">
@@ -131,7 +128,7 @@ tbody tr:hover{background:rgba(255,255,255,.025)}
   <section class="sec"><div class="sec-head"><h2>측정 기록</h2><span class="age">선택 구간 기준 · 최대 50개</span></div>
     <div class="table-wrap"><div class="scroll"><table><thead><tr><th>측정시각</th><th>온도(°C)</th><th>습도(%)</th></tr></thead><tbody id="tb"><tr><td colspan="3" class="empty">데이터 로딩 중...</td></tr></tbody></table></div></div>
   </section>
-  <footer class="ft" id="fu">자동 갱신 준비 중</footer>
+  <footer class="ft" id="fu">수동 새로고침 대기 중</footer>
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
@@ -140,10 +137,10 @@ tbody tr:hover{background:rgba(255,255,255,.025)}
 (function(){
   'use strict';
   var SID='1X1kf9WwHaV1I1apmBNWig-TtqNjBnEMY_t08iKna404';
-  var DEFAULT_OFFSET=16, DEFAULT_HUM_OFFSET=15, POLL=10000, STALE_MS=5*60*1000;
+  var DEFAULT_OFFSET=16, DEFAULT_HUM_OFFSET=15, STALE_MS=5*60*1000;
   var CACHE_KEY='temp-monitor-cache-v2';
   var SETTINGS_KEY='temp-monitor-settings-v2';
-  var currentRange='1d', allRows=[], tChart=null, hChart=null, chartSignature='', requestId=0, isFetching=false, pollTimer=null, lastDataSource='live';
+  var currentRange='1d', allRows=[], tChart=null, hChart=null, chartSignature='', requestId=0, isFetching=false, lastDataSource='live';
   var settings={offset:DEFAULT_OFFSET, humOffset:DEFAULT_HUM_OFFSET};
 
   function $(id){return document.getElementById(id)}
@@ -454,14 +451,10 @@ tbody tr:hover{background:rgba(255,255,255,.025)}
       $('offsetInput').value=DEFAULT_OFFSET; $('humOffsetInput').value=DEFAULT_HUM_OFFSET; saveSettings();
       var source=allRows.map(function(row){return {orig:row.orig,t:row.t,rawH:row.rawH}}); allRows=applySettings(source); updateUI();
     });
-    $('autoRefresh').addEventListener('change',function(){if(this.checked){fetchData();startPolling()}else stopPolling()});
     var cached=loadCache(); if(cached){allRows=cached.rows;updateUI('cache')}
-    fetchData(); startPolling();
-    document.addEventListener('visibilitychange',function(){if(document.hidden)stopPolling();else{if($('autoRefresh').checked){fetchData();startPolling()}}});
+    fetchData();
     window.addEventListener('online',fetchData); window.addEventListener('offline',function(){if(allRows.length){lastDataSource='cache';setStatus('cached','오프라인 · 이전 데이터 표시 중')}else setStatus('error','인터넷 연결 없음')});
   }
-  function startPolling(){stopPolling();if(!$('autoRefresh').checked)return;pollTimer=setInterval(function(){if(!document.hidden)fetchData()},POLL)}
-  function stopPolling(){if(pollTimer){clearInterval(pollTimer);pollTimer=null}}
   start();
 })();
 </script>
