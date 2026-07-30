@@ -112,7 +112,7 @@ tbody tr:hover{background:rgba(255,255,255,.025)}
   <section class="sec">
     <div class="sec-head"><h2>온도 추이</h2><span class="age" id="tempCount"></span></div>
     <div class="range-bar" role="group" aria-label="온도 추이 기간">
-      <button data-range="1h" class="rbtn" type="button">1시간</button><button data-range="1d" class="rbtn active" type="button">1일</button><button data-range="1w" class="rbtn" type="button">1주</button><button data-range="1m" class="rbtn" type="button">1개월</button><button data-range="3m" class="rbtn" type="button">3개월</button><button data-range="6m" class="rbtn" type="button">6개월</button>
+      <button data-range="1h" class="rbtn" type="button">1시간</button><button data-range="1d" class="rbtn active" type="button">1일</button><button data-range="3d" class="rbtn" type="button">3일</button><button data-range="1w" class="rbtn" type="button">1주</button><button data-range="1m" class="rbtn" type="button">1개월</button><button data-range="3m" class="rbtn" type="button">3개월</button><button data-range="6m" class="rbtn" type="button">6개월</button>
     </div>
     <div class="chart-box"><canvas id="tc" height="180" aria-label="온도 차트"></canvas><div class="chart-empty" id="tempEmpty">데이터 로딩 중...</div></div>
   </section>
@@ -120,7 +120,7 @@ tbody tr:hover{background:rgba(255,255,255,.025)}
   <section class="sec">
     <div class="sec-head"><h2>습도 추이</h2><span class="age" id="humCount"></span></div>
     <div class="range-bar" role="group" aria-label="습도 추이 기간">
-      <button data-range="1h" class="rbtn" type="button">1시간</button><button data-range="1d" class="rbtn active" type="button">1일</button><button data-range="1w" class="rbtn" type="button">1주</button><button data-range="1m" class="rbtn" type="button">1개월</button><button data-range="3m" class="rbtn" type="button">3개월</button><button data-range="6m" class="rbtn" type="button">6개월</button>
+      <button data-range="1h" class="rbtn" type="button">1시간</button><button data-range="1d" class="rbtn active" type="button">1일</button><button data-range="3d" class="rbtn" type="button">3일</button><button data-range="1w" class="rbtn" type="button">1주</button><button data-range="1m" class="rbtn" type="button">1개월</button><button data-range="3m" class="rbtn" type="button">3개월</button><button data-range="6m" class="rbtn" type="button">6개월</button>
     </div>
     <div class="chart-box"><canvas id="hc" height="180" aria-label="습도 차트"></canvas><div class="chart-empty" id="humEmpty">데이터 로딩 중...</div></div>
   </section>
@@ -306,14 +306,14 @@ tbody tr:hover{background:rgba(255,255,255,.025)}
     });
     return Object.keys(groups).map(function(key){var group=groups[key];return {adj:group.adj,t:+(group.t/group.count).toFixed(1),h:+(group.h/group.count).toFixed(1)}}).sort(function(a,b){return a.adj-b.adj});
   }
-  function rangeMilliseconds(){return { '1h':3600000,'1d':86400000,'1w':604800000,'1m':2592000000,'3m':7776000000,'6m':15552000000}[currentRange]||86400000}
+  function rangeMilliseconds(){return { '1h':3600000,'1d':86400000,'3d':259200000,'1w':604800000,'1m':2592000000,'3m':7776000000,'6m':15552000000}[currentRange]||86400000}
   function getDisplayData(){
     var valid=allRows.filter(function(row){return finite(row.t)&&finite(row.h)});
     if(!valid.length) return [];
     var latest=valid.slice().sort(function(a,b){return b.adj-a.adj})[0];
     var start=new Date(latest.adj.getTime()-rangeMilliseconds());
     var range=valid.filter(function(row){return row.adj>=start&&row.adj<=latest.adj});
-    if(currentRange==='1w') return aggregate(range,'hour');
+    if(currentRange==='3d'||currentRange==='1w') return aggregate(range,'hour');
     if(currentRange==='1m') return aggregate(range,'fourHour');
     if(currentRange==='3m'||currentRange==='6m') return aggregate(range,'day');
     return range.slice().sort(function(a,b){return a.adj-b.adj});
@@ -322,7 +322,7 @@ tbody tr:hover{background:rgba(255,255,255,.025)}
     var options={type:'time',time:{},grid:{color:'rgba(255,255,255,.06)'},ticks:{color:'#64748b',font:{size:10}}};
     var map={
       '1h':{unit:'minute',stepSize:10,format:'HH:mm',limit:8},'1d':{unit:'hour',stepSize:3,format:'HH:mm',limit:12},
-      '1w':{unit:'day',stepSize:1,format:'MM/dd',limit:8},'1m':{unit:'day',stepSize:4,format:'MM/dd',limit:8},
+      '3d':{unit:'hour',stepSize:6,format:'MM/dd HH:mm',limit:12},'1w':{unit:'day',stepSize:1,format:'MM/dd',limit:8},'1m':{unit:'day',stepSize:4,format:'MM/dd',limit:8},
       '3m':{unit:'week',stepSize:2,format:'MM/dd',limit:8},'6m':{unit:'month',stepSize:1,format:'yy/MM',limit:8}
     }[currentRange]||null;
     if(map){options.time.unit=map.unit;options.time.stepSize=map.stepSize;options.time.displayFormats={};options.time.displayFormats[map.unit]=map.format;options.ticks.maxTicksLimit=map.limit}
