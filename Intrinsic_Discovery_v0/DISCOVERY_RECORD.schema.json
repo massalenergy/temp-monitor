@@ -1,0 +1,105 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Discovery Record v0",
+  "type": "object",
+  "required": [
+    "id",
+    "date",
+    "domain",
+    "target",
+    "seed",
+    "candidate_type",
+    "proposal",
+    "novelty",
+    "utility",
+    "risk",
+    "evidence_state",
+    "reproduction_state",
+    "promotion_state",
+    "source"
+  ],
+  "properties": {
+    "id": {"type": "string", "pattern": "^DISC-[0-9]{8}-[0-9]{3,}$"},
+    "date": {"type": "string"},
+    "domain": {"enum": ["app", "archive", "collector", "generic"]},
+    "target": {"type": "string", "minLength": 1},
+    "seed": {"type": "string", "minLength": 1},
+    "candidate_type": {
+      "enum": [
+        "state",
+        "action_sequence",
+        "failure",
+        "anomaly",
+        "data_gap",
+        "question",
+        "hypothesis",
+        "conflict",
+        "missing_evidence",
+        "workflow"
+      ]
+    },
+    "pre_state": {"type": ["string", "null"]},
+    "proposal": {"type": "string", "minLength": 1},
+    "actions_or_query": {
+      "type": "array",
+      "items": {"type": "string"}
+    },
+    "observation": {"type": ["string", "null"]},
+    "expected_observation": {"type": ["string", "null"]},
+    "novelty": {
+      "type": "object",
+      "required": ["score", "rationale"],
+      "properties": {
+        "score": {"type": "number", "minimum": 0, "maximum": 1},
+        "rationale": {"type": "string"},
+        "nearest_known": {"type": ["string", "null"]}
+      },
+      "additionalProperties": false
+    },
+    "utility": {
+      "type": "object",
+      "required": ["score", "rationale"],
+      "properties": {
+        "score": {"type": "number", "minimum": 0, "maximum": 1},
+        "rationale": {"type": "string"}
+      },
+      "additionalProperties": false
+    },
+    "risk": {
+      "type": "object",
+      "required": ["level", "boundary"],
+      "properties": {
+        "level": {"enum": ["low", "medium", "high", "blocked"]},
+        "boundary": {"type": "string"}
+      },
+      "additionalProperties": false
+    },
+    "evidence_state": {
+      "enum": ["OBSERVED", "INFERRED", "UNKNOWN", "NOT_TESTABLE", "CONTRADICTED"]
+    },
+    "evidence_refs": {
+      "type": "array",
+      "items": {"type": "string"}
+    },
+    "reproduction_state": {
+      "enum": ["NOT_ATTEMPTED", "READY_TO_REPRODUCE", "REPRODUCED", "NOT_REPRODUCED", "NOT_TESTABLE"]
+    },
+    "reproduction_receipt": {"type": ["string", "null"]},
+    "promotion_state": {
+      "enum": [
+        "discovered",
+        "evaluated",
+        "rejected",
+        "archive_only",
+        "regression_candidate",
+        "workflow_candidate",
+        "rule_candidate",
+        "promoted",
+        "retired"
+      ]
+    },
+    "source": {"type": "string"},
+    "notes": {"type": ["string", "null"]}
+  },
+  "additionalProperties": false
+}
